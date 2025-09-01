@@ -17,6 +17,7 @@ export class Subtitle extends plugin {
         {
           reg: "#?mcst (.*)",
           fnc: "subTitle",
+          permission: "master"
         },
       ],
     });
@@ -27,7 +28,7 @@ export class Subtitle extends plugin {
       return false;
     }
 
-    const globalConfig = await Config.getConfig();
+    const globalConfig = Config.getConfig();
     const { mc_qq_server_list: serverList, debug_mode: debugMode } = globalConfig;
 
     if (!serverList || serverList.length === 0) {

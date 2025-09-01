@@ -28,7 +28,7 @@ export class Main extends plugin {
       return false;
     }
 
-    const globalConfig = await Config.getConfig();
+    const globalConfig = Config.getConfig();
     const { mc_qq_server_list: serverList, debug_mode: debugMode } = globalConfig;
 
     if (!serverList || serverList.length === 0) {
@@ -59,11 +59,16 @@ export class Main extends plugin {
 
       const isCommand = e.msg?.startsWith(serverCfg.command_header);
       const canExecuteCommand = serverCfg.command_user?.some(user => user == e.user_id) || e.isMaster;
+      
+      // 过滤掉以#和/开头的消息，防止同步到服务器
+      const isFilteredMessage = e.msg?.startsWith('#') || e.msg?.startsWith('/');
 
       if (isCommand && canExecuteCommand) {
         await this._handleServerCommand(e, serverCfg, rconConnection, debugMode);
-      } else if (!isCommand) {
+      } else if (!isCommand && !isFilteredMessage) {
         await this._handleChatMessageSync(e, serverCfg, wsConnection, rconConnection, globalConfig);
+      } else if (isFilteredMessage && debugMode) {
+        logger.info(LOG_PREFIX_CLIENT + `过滤消息 (以#或/开头): ${e.msg}`);
       }
     }
 
