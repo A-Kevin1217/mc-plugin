@@ -74,12 +74,20 @@ class RconManager {
      */
     _cleanupConnection(serverName) {
         if (this.activeConnections[serverName]) {
+            // 尝试关闭连接
+            try {
+                this.activeConnections[serverName].end();
+            } catch (e) {
+                // 忽略关闭连接时的错误
+            }
             delete this.activeConnections[serverName];
         }
         if (this.reconnectTimers[serverName]) {
             clearTimeout(this.reconnectTimers[serverName]);
             delete this.reconnectTimers[serverName];
         }
+        // 重置重连尝试计数器
+        this.reconnectAttempts[serverName] = 0;
     }
 
     /**
@@ -107,6 +115,12 @@ class RconManager {
 
         if (!serverCfg.rcon_able) {
             logger.info(RCON_LOG_PREFIX + `${serverName} RCON已禁用，停止重连`);
+            // 清理定时器以确保不会继续重连
+            if (this.reconnectTimers[serverName]) {
+                clearTimeout(this.reconnectTimers[serverName]);
+                delete this.reconnectTimers[serverName];
+            }
+            this._setConnectionState(serverName, CONNECTION_STATES.DISCONNECTED);
             return;
         }
 
@@ -120,6 +134,11 @@ class RconManager {
         if (attempts > maxAttempts) {
             logger.info(RCON_LOG_PREFIX + `${serverName} 已达到最大重连尝试次数 (${maxAttempts})，停止自动重连`);
             this._setConnectionState(serverName, CONNECTION_STATES.DISCONNECTED);
+            // 确保定时器被清理
+            if (this.reconnectTimers[serverName]) {
+                clearTimeout(this.reconnectTimers[serverName]);
+                delete this.reconnectTimers[serverName];
+            }
             return;
         }
 
@@ -127,6 +146,8 @@ class RconManager {
 
         this._setConnectionState(serverName, CONNECTION_STATES.RECONNECTING);
         this.reconnectTimers[serverName] = setTimeout(() => {
+            // 确保定时器引用被清除
+            delete this.reconnectTimers[serverName];
             this._attemptReconnect(serverCfg);
         }, delay);
     }
