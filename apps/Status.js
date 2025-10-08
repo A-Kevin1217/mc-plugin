@@ -95,7 +95,7 @@ export class Status extends plugin {
         msg += `• WebSocket：${wsConnected}/${wsTotal} 已连接`
       }
 
-      msg += `\n\n💡 使用 #mc重连 可手动重连所有服务器`
+      msg += `\n\n\`\`\`💡 使用 #mc重连 可手动重连所有服务器\`\`\``
 
       await e.reply(msg)
     } catch (error) {
