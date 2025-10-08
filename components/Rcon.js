@@ -116,19 +116,14 @@ class RconManager {
         const delay = this._calculateReconnectDelay(attempts);
         const maxAttempts = serverCfg.rcon_max_attempts || 3;
         
-        // 短期重连（有限次数）和长期重连（无限次数，更长间隔）
-        if (attempts <= maxAttempts) {
-            logger.info(RCON_LOG_PREFIX + `${serverName} 将在 ${delay/1000} 秒后尝试重新连接... (尝试次数: ${attempts}/${maxAttempts})`);
-        } else {
-            // 长期重连，每5分钟尝试一次
-            const longTermDelay = 300000; // 5分钟
-            logger.info(RCON_LOG_PREFIX + `${serverName} 进入长期重连模式，将在 ${longTermDelay/1000} 秒后重试...`);
-            
-            this.reconnectTimers[serverName] = setTimeout(() => {
-                this._attemptReconnect(serverCfg);
-            }, longTermDelay);
+        // 如果超过最大尝试次数，则停止重连
+        if (attempts > maxAttempts) {
+            logger.info(RCON_LOG_PREFIX + `${serverName} 已达到最大重连尝试次数 (${maxAttempts})，停止自动重连`);
+            this._setConnectionState(serverName, CONNECTION_STATES.DISCONNECTED);
             return;
         }
+
+        logger.info(RCON_LOG_PREFIX + `${serverName} 将在 ${delay/1000} 秒后尝试重新连接... (尝试次数: ${attempts}/${maxAttempts})`);
 
         this._setConnectionState(serverName, CONNECTION_STATES.RECONNECTING);
         this.reconnectTimers[serverName] = setTimeout(() => {
