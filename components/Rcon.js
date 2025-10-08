@@ -86,8 +86,7 @@ class RconManager {
             clearTimeout(this.reconnectTimers[serverName]);
             delete this.reconnectTimers[serverName];
         }
-        // 重置重连尝试计数器
-        this.reconnectAttempts[serverName] = 0;
+        // 不要在这里重置重连尝试计数器，让它在成功连接时重置
     }
 
     /**
@@ -107,9 +106,7 @@ class RconManager {
         const serverName = serverCfg.server_name;
         
         // 防止重复重连
-        if (this.reconnectTimers[serverName] || 
-            this._getConnectionState(serverName) === CONNECTION_STATES.CONNECTING ||
-            this._getConnectionState(serverName) === CONNECTION_STATES.RECONNECTING) {
+        if (this.reconnectTimers[serverName]) {
             return;
         }
 
@@ -124,8 +121,11 @@ class RconManager {
             return;
         }
 
-        const attempts = (this.reconnectAttempts[serverName] || 0) + 1;
+        // 增加重连尝试次数
+        const currentAttempts = this.reconnectAttempts[serverName] || 0;
+        const attempts = currentAttempts + 1;
         this.reconnectAttempts[serverName] = attempts;
+        logger.debug(RCON_LOG_PREFIX + `${serverName} 重连尝试次数更新: ${currentAttempts} -> ${attempts}`);
         
         const delay = this._calculateReconnectDelay(attempts);
         const maxAttempts = serverCfg.rcon_max_attempts || 3;
@@ -139,6 +139,9 @@ class RconManager {
                 clearTimeout(this.reconnectTimers[serverName]);
                 delete this.reconnectTimers[serverName];
             }
+            // 重置尝试次数，以便下次可以重新开始
+            logger.debug(RCON_LOG_PREFIX + `${serverName} 达到最大重连次数，重置计数器`);
+            this.reconnectAttempts[serverName] = 0;
             return;
         }
 
@@ -162,10 +165,13 @@ class RconManager {
         if (!serverCfg.rcon_able) {
             logger.info(RCON_LOG_PREFIX + `${serverName} RCON已禁用，取消重连`);
             this._setConnectionState(serverName, CONNECTION_STATES.DISCONNECTED);
+            // 重置尝试次数
+            logger.debug(RCON_LOG_PREFIX + `${serverName} 连接禁用时重置计数器`);
+            this.reconnectAttempts[serverName] = 0;
             return;
         }
 
-        await this._establishConnection(serverCfg);
+        await this._establishConnection(serverCfg, true);
     }
 
     async _establishConnection(serverCfg, isReconnect = false) {
@@ -178,10 +184,6 @@ class RconManager {
         }
 
         this._setConnectionState(serverName, CONNECTION_STATES.CONNECTING);
-        
-        if (!isReconnect) {
-            this.reconnectAttempts[serverName] = 0;
-        }
 
         logger.info(RCON_LOG_PREFIX + `尝试连接到 ${serverName} (${host}:${port})...`);
 
@@ -198,6 +200,7 @@ class RconManager {
             
             // 连接成功，重置重连计数
             this.activeConnections[serverName] = rcon;
+            logger.debug(RCON_LOG_PREFIX + `${serverName} 连接成功，重置计数器`);
             this.reconnectAttempts[serverName] = 0;
             this._setConnectionState(serverName, CONNECTION_STATES.CONNECTED);
 
@@ -206,6 +209,7 @@ class RconManager {
                 logger.mark(RCON_LOG_PREFIX + logger.yellow(serverName) + ' RCON连接已断开');
                 this._cleanupConnection(serverName);
                 this._setConnectionState(serverName, CONNECTION_STATES.DISCONNECTED);
+                logger.debug(RCON_LOG_PREFIX + `${serverName} 连接断开，安排重连`);
                 this._scheduleReconnect(serverCfg);
             });
 
@@ -213,6 +217,7 @@ class RconManager {
                 logger.error(RCON_LOG_PREFIX + logger.red(serverName) + ` RCON连接发生错误: ${err.message}`);
                 this._cleanupConnection(serverName);
                 this._setConnectionState(serverName, CONNECTION_STATES.DISCONNECTED);
+                logger.debug(RCON_LOG_PREFIX + `${serverName} 连接错误，安排重连`);
                 this._scheduleReconnect(serverCfg);
             });
 
@@ -220,6 +225,7 @@ class RconManager {
             logger.warn(RCON_LOG_PREFIX + logger.red(serverName) + ` RCON连接失败: ${error.message}`);
             this._cleanupConnection(serverName);
             this._setConnectionState(serverName, CONNECTION_STATES.FAILED);
+            logger.debug(RCON_LOG_PREFIX + `${serverName} 连接失败，安排重连`);
             this._scheduleReconnect(serverCfg);
         }
     }
@@ -245,6 +251,7 @@ class RconManager {
         
         // 清理现有连接和定时器
         this._cleanupConnection(serverName);
+        logger.debug(RCON_LOG_PREFIX + `${serverName} 手动重连前重置计数器`);
         this.reconnectAttempts[serverName] = 0;
         
         await this._establishConnection(serverCfg, false);
@@ -272,6 +279,19 @@ class RconManager {
         });
         
         return status;
+    }
+
+    /**
+     * 重置指定服务器的重连尝试计数器
+     */
+    resetReconnectAttempts(serverName) {
+        this.reconnectAttempts[serverName] = 0;
+        // 同时清理重连定时器
+        if (this.reconnectTimers[serverName]) {
+            clearTimeout(this.reconnectTimers[serverName]);
+            delete this.reconnectTimers[serverName];
+        }
+        logger.info(RCON_LOG_PREFIX + `${serverName} 重连尝试计数器已重置`);
     }
 
     /**

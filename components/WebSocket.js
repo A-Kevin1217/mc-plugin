@@ -208,19 +208,26 @@ class WebSocketManager {
         const serverName = serverCfg.server_name;
         
         // 防止重复重连
-        if (this.reconnectTimers[serverName] || 
-            this._getConnectionState(serverName) === CONNECTION_STATES.CONNECTING ||
-            this._getConnectionState(serverName) === CONNECTION_STATES.RECONNECTING) {
+        if (this.reconnectTimers[serverName]) {
             return;
         }
 
         if (!serverCfg.ws_able) {
             logger.info(WS_LOG_PREFIX + `${serverName} WebSocket已禁用，停止重连`);
+            // 清理定时器以确保不会继续重连
+            if (this.reconnectTimers[serverName]) {
+                clearTimeout(this.reconnectTimers[serverName]);
+                delete this.reconnectTimers[serverName];
+            }
+            this._setConnectionState(serverName, CONNECTION_STATES.DISCONNECTED);
             return;
         }
 
-        const attempts = (this.reconnectAttempts[serverName] || 0) + 1;
+        // 增加重连尝试次数
+        const currentAttempts = this.reconnectAttempts[serverName] || 0;
+        const attempts = currentAttempts + 1;
         this.reconnectAttempts[serverName] = attempts;
+        logger.debug(WS_LOG_PREFIX + `${serverName} 重连尝试次数更新: ${currentAttempts} -> ${attempts}`);
         
         const delay = this._calculateReconnectDelay(attempts);
         const maxAttempts = serverCfg.ws_max_attempts || 3;
@@ -229,6 +236,14 @@ class WebSocketManager {
         if (attempts > maxAttempts) {
             logger.info(WS_LOG_PREFIX + `${serverName} 已达到最大重连尝试次数 (${maxAttempts})，停止自动重连`);
             this._setConnectionState(serverName, CONNECTION_STATES.DISCONNECTED);
+            // 确保定时器被清理
+            if (this.reconnectTimers[serverName]) {
+                clearTimeout(this.reconnectTimers[serverName]);
+                delete this.reconnectTimers[serverName];
+            }
+            // 重置尝试次数，以便下次可以重新开始
+            logger.debug(WS_LOG_PREFIX + `${serverName} 达到最大重连次数，重置计数器`);
+            this.reconnectAttempts[serverName] = 0;
             return;
         }
 
@@ -236,6 +251,8 @@ class WebSocketManager {
 
         this._setConnectionState(serverName, CONNECTION_STATES.RECONNECTING);
         this.reconnectTimers[serverName] = setTimeout(() => {
+            // 确保定时器引用被清除
+            delete this.reconnectTimers[serverName];
             this._attemptReconnect(serverCfg, globalDebug);
         }, delay);
     }
@@ -250,6 +267,9 @@ class WebSocketManager {
         if (!serverCfg.ws_able) {
             logger.info(WS_LOG_PREFIX + `${serverName} WebSocket已禁用，取消重连`);
             this._setConnectionState(serverName, CONNECTION_STATES.DISCONNECTED);
+            // 重置尝试次数
+            logger.debug(WS_LOG_PREFIX + `${serverName} 连接禁用时重置计数器`);
+            this.reconnectAttempts[serverName] = 0;
             return;
         }
 
@@ -287,6 +307,7 @@ class WebSocketManager {
                 
                 // 连接成功，重置重连计数
                 this.activeSockets[serverName] = ws;
+                logger.debug(WS_LOG_PREFIX + `${serverName} 连接成功，重置计数器`);
                 this.reconnectAttempts[serverName] = 0;
                 this._setConnectionState(serverName, CONNECTION_STATES.CONNECTED);
             });
@@ -314,6 +335,7 @@ class WebSocketManager {
                 
                 // 只有非主动关闭的情况才重连
                 if (code !== 1000) { // 1000 = 正常关闭
+                    logger.debug(WS_LOG_PREFIX + `${serverName} 连接断开，安排重连`);
                     this._scheduleReconnect(serverCfg, globalDebug);
                 }
             });
@@ -326,6 +348,7 @@ class WebSocketManager {
                 );
                 this._cleanupConnection(serverName);
                 this._setConnectionState(serverName, CONNECTION_STATES.FAILED);
+                logger.debug(WS_LOG_PREFIX + `${serverName} 连接错误，安排重连`);
                 this._scheduleReconnect(serverCfg, globalDebug);
             });
 
@@ -333,6 +356,7 @@ class WebSocketManager {
             logger.warn(WS_LOG_PREFIX + logger.red(serverName) + ` WebSocket连接失败: ${error.message}`);
             this._cleanupConnection(serverName);
             this._setConnectionState(serverName, CONNECTION_STATES.FAILED);
+            logger.debug(WS_LOG_PREFIX + `${serverName} 连接失败，安排重连`);
             this._scheduleReconnect(serverCfg, globalDebug);
         }
     }
@@ -358,6 +382,7 @@ class WebSocketManager {
         
         // 清理现有连接和定时器
         this._cleanupConnection(serverName);
+        logger.debug(WS_LOG_PREFIX + `${serverName} 手动重连前重置计数器`);
         this.reconnectAttempts[serverName] = 0;
         
         const globalDebug = config.debug_mode;
@@ -386,6 +411,19 @@ class WebSocketManager {
         });
         
         return status;
+    }
+
+    /**
+     * 重置指定服务器的重连尝试计数器
+     */
+    resetReconnectAttempts(serverName) {
+        this.reconnectAttempts[serverName] = 0;
+        // 同时清理重连定时器
+        if (this.reconnectTimers[serverName]) {
+            clearTimeout(this.reconnectTimers[serverName]);
+            delete this.reconnectTimers[serverName];
+        }
+        logger.info(WS_LOG_PREFIX + `${serverName} 重连尝试计数器已重置`);
     }
 
     /**
